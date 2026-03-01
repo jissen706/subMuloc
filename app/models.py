@@ -264,3 +264,38 @@ class Evidence(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     drug = relationship("Drug", back_populates="evidence_records")
+
+
+# ---------------------------------------------------------------------------
+# disease (Block 1: disease ingestion)
+# ---------------------------------------------------------------------------
+class Disease(Base):
+    __tablename__ = "disease"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    canonical_name = Column(Text, nullable=False, index=True)
+    ids_json = Column(JSON, nullable=True)  # {"orpha": str|null, "omim": str|null}
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    artifacts = relationship("DiseaseArtifact", back_populates="disease", cascade="all, delete-orphan")
+
+
+# ---------------------------------------------------------------------------
+# disease_artifact
+# ---------------------------------------------------------------------------
+class DiseaseArtifact(Base):
+    __tablename__ = "disease_artifact"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    disease_id = Column(String(36), ForeignKey("disease.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(64), nullable=False)  # summary_raw
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    disease = relationship("Disease", back_populates="artifacts")

@@ -131,6 +131,44 @@ Liveness probe.
 
 ---
 
+## Disease (Block 1)
+
+Disease ingestion and short summary (first-class entities alongside drugs).
+
+### CURL demo
+
+```bash
+# 1) Ingest a disease (synchronous)
+curl -X POST http://localhost:8000/disease/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Brugada syndrome"}'
+
+# 2) Get short summary (use disease_id from step 1)
+curl http://localhost:8000/disease/{disease_id}/summary_short
+```
+
+### Endpoints
+
+- **POST /disease/resolve** — Resolve query to canonical_name, ids (orpha/omim), synonyms, resolver_notes.
+- **POST /disease/ingest** — Resolve, upsert disease, run ingestion, store raw artifact; returns disease_id.
+- **GET /disease/{disease_id}/summary** — Raw stored JSON.
+- **GET /disease/{disease_id}/summary_short** — Deterministic compact JSON (version `disease_short_v1`).
+
+### Smoke test list (manual ingestion)
+
+- Brugada syndrome
+- Catecholaminergic polymorphic ventricular tachycardia
+- Short QT syndrome
+- Hypertrophic cardiomyopathy
+- Arrhythmogenic right ventricular cardiomyopathy
+- Loeys-Dietz syndrome
+- Milroy disease
+- Lymphedema-distichiasis syndrome
+- Bardet-Biedl syndrome
+- Joubert syndrome
+
+---
+
 ## Architecture
 
 ```

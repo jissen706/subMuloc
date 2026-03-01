@@ -56,6 +56,9 @@ app = FastAPI(
     description="Evidence ingestion + normalization for drug data from public sources.",
 )
 
+from app.routes.disease import router as disease_router
+app.include_router(disease_router)
+
 
 # ---------------------------------------------------------------------------
 # Health
