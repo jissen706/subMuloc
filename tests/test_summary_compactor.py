@@ -14,6 +14,12 @@ if __name__ == "__main__":
 
 from app.services.summary_compactor import compact_drug_summary
 
+# Exact keys expected from GET /drug/{id}/summary_short and build_drug_short (regression)
+EXPECTED_DRUG_SHORT_KEYS = frozenset({
+    "drug_id", "canonical_name", "drug_type", "identifiers", "structure",
+    "targets_top", "trials", "safety", "pathways_top", "stats", "notes", "version",
+})
+
 
 # Minimal raw summary: small molecule with SMILES
 FIXTURE_SMALL_MOLECULE = {
@@ -176,6 +182,11 @@ class TestCompactDrugSummary(unittest.TestCase):
         self.assertFalse(out["safety"]["boxed_warning"])
         self.assertEqual(out["pathways_top"], [])
         self.assertEqual(out["version"], "short_v1")
+
+    def test_drug_short_schema_keys_match_endpoint(self) -> None:
+        """Regression: compact_drug_summary (and thus build_drug_short) output keys match GET /drug/{id}/summary_short."""
+        out = compact_drug_summary(FIXTURE_SMALL_MOLECULE)
+        self.assertEqual(set(out.keys()), EXPECTED_DRUG_SHORT_KEYS, "drug_short keys must match expected schema")
 
 
 if __name__ == "__main__":

@@ -169,6 +169,46 @@ curl http://localhost:8000/disease/{disease_id}/summary_short
 
 ---
 
+## Block 2 — Mechanism vectors & search
+
+Vectorize drugs/diseases into mechanism space and search diseases-for-drug by cosine similarity.
+
+### CURL examples
+
+```bash
+# Vectorize a drug (compute + store)
+curl -X POST http://localhost:8000/vectorize/drug/{drug_id}
+
+# Vectorize a disease
+curl -X POST http://localhost:8000/vectorize/disease/{disease_id}
+
+# Batch vectorize diseases (skip_existing: true)
+curl -X POST http://localhost:8000/vectorize/batch/diseases \
+  -H "Content-Type: application/json" \
+  -d '{"disease_ids": ["uuid1", "uuid2"], "skip_existing": true}'
+
+# Get stored vector for an entity
+curl http://localhost:8000/vector/drug/{drug_id}
+curl http://localhost:8000/vector/disease/{disease_id}
+
+# Search diseases matching a drug (cosine similarity)
+curl -X POST http://localhost:8000/search/diseases_for_drug \
+  -H "Content-Type: application/json" \
+  -d '{"drug_id": "{drug_id}", "top_k": 20}'
+```
+
+### Validation script
+
+Run against real DB to ensure vectors are non-empty and search returns sensible results:
+
+```bash
+python scripts/validate_block2.py
+```
+
+If the DB has no ingested drugs/diseases, the script prints instructions to ingest first.
+
+---
+
 ## Architecture
 
 ```

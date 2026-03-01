@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -23,6 +23,10 @@ from app.db import Base
 
 def _uuid() -> str:
     return str(uuid.uuid4())
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -299,3 +303,41 @@ class DiseaseArtifact(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     disease = relationship("Disease", back_populates="artifacts")
+
+
+# ---------------------------------------------------------------------------
+# mechanism_vector  (Block 2)
+# Stores dense + sparse mechanism vectors for drug/disease entities.
+# Unique on (entity_type, entity_id, vocab_version, nodes_hash) so a
+# vocab bump automatically creates new rows rather than overwriting.
+# ---------------------------------------------------------------------------
+class MechanismVector(Base):
+    __tablename__ = "mechanism_vector"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type", "entity_id", "vocab_version", "nodes_hash",
+            name="uq_mechvec_entity_vocab",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    entity_type = Column(String(16), nullable=False)   # 'drug' | 'disease'
+    entity_id = Column(String(36), nullable=False, index=True)
+    vocab_version = Column(String(64), nullable=False)
+    nodes_hash = Column(String(128), nullable=False)
+    dense_weights = Column(JSON, nullable=True)    # list[float], len == N nodes
+    dense_direction = Column(JSON, nullable=True)  # list[int],  len == N nodes
+    sparse = Column(JSON, nullable=True)           # dict node -> {weight, direction, evidence}
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        default=_utcnow,
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        default=_utcnow,
+        onupdate=_utcnow,
+        nullable=False,
+    )
