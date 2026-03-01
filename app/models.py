@@ -341,3 +341,36 @@ class MechanismVector(Base):
         onupdate=_utcnow,
         nullable=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# pair_evidence  (Block 4)
+# Evidence ledger for drug-disease pairs.
+# ---------------------------------------------------------------------------
+class PairEvidence(Base):
+    __tablename__ = "pair_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "drug_id", "disease_id", "score_version",
+            name="uq_pair_evidence_drug_disease_version",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    drug_id = Column(String(36), nullable=False, index=True)
+    disease_id = Column(String(36), nullable=False, index=True)
+    score_version = Column(String(64), nullable=False, default="score_v1")
+    payload = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        default=_utcnow,
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        default=_utcnow,
+        onupdate=_utcnow,
+        nullable=False,
+    )

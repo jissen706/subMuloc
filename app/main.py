@@ -57,9 +57,13 @@ app = FastAPI(
 )
 
 from app.routes.disease import router as disease_router
+from app.routes.evidence import router as evidence_router
+from app.routes.score import router as score_router
 from app.routes.vectorize import router as vectorize_router
 
 app.include_router(disease_router)
+app.include_router(evidence_router)
+app.include_router(score_router)
 app.include_router(vectorize_router)
 
 
