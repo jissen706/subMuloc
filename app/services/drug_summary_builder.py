@@ -215,3 +215,146 @@ def build_drug_short(drug_id: str, db: Session) -> dict | None:
     )
 
     return compact_drug_summary(summary_out.model_dump())
+
+
+def build_drug_raw_summary(drug_id: str, db: Session) -> dict | None:
+    """
+    Build raw drug summary dict (same structure as GET /drug/{id}/summary).
+    Used by comparator engine for trial conditions. Returns None if drug not found.
+    """
+    drug = db.get(Drug, drug_id)
+    if drug is None:
+        return None
+
+    identifiers = db.execute(
+        select(DrugIdentifier).where(DrugIdentifier.drug_id == drug_id)
+    ).scalars().all()
+
+    synonyms_rows = db.execute(
+        select(DrugSynonym).where(DrugSynonym.drug_id == drug_id)
+    ).scalars().all()
+
+    structure = db.get(MolecularStructure, drug_id)
+
+    targets = db.execute(
+        select(Target).where(Target.drug_id == drug_id)
+    ).scalars().all()
+
+    trials = db.execute(
+        select(Trial).where(Trial.drug_id == drug_id)
+    ).scalars().all()
+
+    pubs = db.execute(
+        select(Publication).where(Publication.drug_id == drug_id)
+    ).scalars().all()
+
+    warnings = db.execute(
+        select(LabelWarning).where(LabelWarning.drug_id == drug_id)
+    ).scalars().all()
+
+    tox_metrics = db.execute(
+        select(ToxicityMetric).where(ToxicityMetric.drug_id == drug_id)
+    ).scalars().all()
+
+    pathway_rows = db.execute(
+        select(DiseasePathwayMention).where(DiseasePathwayMention.drug_id == drug_id)
+    ).scalars().all()
+
+    clinvar_rows = db.execute(
+        select(ClinVarAssociation).where(ClinVarAssociation.drug_id == drug_id)
+    ).scalars().all()
+
+    by_phase: dict[str, int] = defaultdict(int)
+    by_status: dict[str, int] = defaultdict(int)
+    trial_outs: list[dict] = []
+    for t in trials:
+        by_phase[t.phase or "Unknown"] += 1
+        by_status[t.status or "Unknown"] += 1
+        trial_outs.append({
+            "nct_id": t.nct_id,
+            "title": t.title,
+            "phase": t.phase,
+            "status": t.status,
+            "conditions": t.conditions_json if isinstance(t.conditions_json, list) else [],
+            "sponsor": t.sponsor,
+            "start_date": t.start_date,
+            "completion_date": t.completion_date,
+            "results_posted": t.results_posted,
+            "url": t.url,
+        })
+
+    pathway_agg: dict[str, dict] = {}
+    for row in pathway_rows:
+        term = row.pathway_term
+        if term not in pathway_agg:
+            pathway_agg[term] = {"count": 0, "max_confidence": 0.0, "sources": set()}
+        pathway_agg[term]["count"] += 1
+        pathway_agg[term]["max_confidence"] = max(
+            pathway_agg[term]["max_confidence"], row.confidence or 0.0
+        )
+        pathway_agg[term]["sources"].add(row.evidence_source)
+
+    pathway_out = [
+        {
+            "pathway_term": term,
+            "count": agg["count"],
+            "max_confidence": round(agg["max_confidence"], 2),
+            "evidence_sources": sorted(agg["sources"]),
+        }
+        for term, agg in sorted(pathway_agg.items(), key=lambda x: (-x[1]["count"], -x[1]["max_confidence"]))
+    ]
+
+    by_year: dict[int, int] = defaultdict(int)
+    for p in pubs:
+        if p.year:
+            by_year[p.year] += 1
+
+    recent_pubs = sorted(
+        [p for p in pubs if p.year],
+        key=lambda p: p.year or 0,
+        reverse=True,
+    )[:10]
+
+    return {
+        "drug_id": drug_id,
+        "canonical_name": drug.canonical_name,
+        "identifiers": [{"id_type": i.id_type, "value": i.value} for i in identifiers],
+        "synonyms": [s.synonym for s in synonyms_rows],
+        "molecular_structure": {
+            "smiles": structure.smiles if structure else None,
+            "inchi": structure.inchi if structure else None,
+            "molecular_formula": structure.molecular_formula if structure else None,
+            "molecular_weight": structure.molecular_weight if structure else None,
+        } if structure else None,
+        "targets": [
+            {"target_name": t.target_name, "gene_symbol": t.gene_symbol, "source": t.source, "evidence": t.evidence}
+            for t in targets
+        ],
+        "trials": {
+            "total": len(trials),
+            "by_phase": dict(by_phase),
+            "by_status": dict(by_status),
+            "trials": trial_outs,
+        },
+        "publications": {
+            "total": len(pubs),
+            "by_year": dict(by_year),
+            "recent": [
+                {"pmid": p.pmid, "title": p.title, "year": p.year, "journal": p.journal, "url": p.url}
+                for p in recent_pubs
+            ],
+        },
+        "label_warnings": [{"section": w.section, "text": w.text, "url": w.url} for w in warnings],
+        "toxicity_metrics": [
+            {"metric_type": m.metric_type, "value": m.value, "units": m.units,
+             "interpreted_flag": m.interpreted_flag, "evidence_source": m.evidence_source,
+             "evidence_ref": m.evidence_ref, "notes": m.notes}
+            for m in tox_metrics
+        ],
+        "pathway_mentions": pathway_out,
+        "clinvar_associations": [
+            {"gene_symbol": c.gene_symbol, "variant": c.variant,
+             "clinical_significance": c.clinical_significance, "condition": c.condition, "url": c.url}
+            for c in clinvar_rows
+        ],
+    }

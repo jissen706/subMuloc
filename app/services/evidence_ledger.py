@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.models import PairEvidence
 from app.services.mechanism_vocab import MECH_ALIASES
+from app.services.node_tiering import compute_node_tiers
 
 SCORE_VERSION = "score_v1"
 EVIDENCE_VERSION = "evidence_v1"
@@ -76,9 +77,10 @@ def build_pair_evidence(
     disease_sparse = disease_sparse or {}
     scoring_breakdown = scoring_breakdown or {}
 
-    # 1) Mechanism overlap from breakdown
+    # 1) Mechanism overlap from breakdown (with tier info from node_tiering)
     mech = scoring_breakdown.get("mechanism") or {}
     top_nodes_raw = mech.get("top_nodes") or []
+    node_tiers = compute_node_tiers(drug_short, drug_sparse)
     mechanism_overlap: list[dict] = []
     for n in top_nodes_raw[: _MAX_MECHANISM_OVERLAP]:
         if not isinstance(n, dict):
@@ -88,12 +90,19 @@ def build_pair_evidence(
         disease_w = float(n.get("disease_w") or 0)
         if node:
             overlap_weight = min(drug_w, disease_w)
-            mechanism_overlap.append({
+            tier_info = node_tiers.get(node, {})
+            item: dict[str, Any] = {
+                "type": "mechanism_overlap",
                 "node": node,
                 "drug_weight": round(drug_w, 4),
                 "disease_weight": round(disease_w, 4),
                 "overlap_weight": round(overlap_weight, 4),
-            })
+            }
+            if tier_info:
+                item["tier"] = tier_info.get("tier", 0)
+                item["support"] = tier_info.get("support", [])
+                item["weight"] = tier_info.get("weight", round(drug_w, 4))
+            mechanism_overlap.append(item)
     mechanism_overlap.sort(key=lambda x: (-x["overlap_weight"], x["node"]))
     mechanism_overlap = mechanism_overlap[:_MAX_MECHANISM_OVERLAP]
 
