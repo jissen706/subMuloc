@@ -1,0 +1,24 @@
+# Core framework
+fastapi==0.111.1
+uvicorn[standard]==0.30.1
+pydantic==2.7.4
+pydantic-settings==2.3.4
+
+# Database
+sqlalchemy==2.0.31
+psycopg2-binary==2.9.9
+alembic==1.13.2
+
+# Background tasks
+celery==5.4.0
+redis==5.0.7
+
+# HTTP client + retry
+requests==2.32.3
+tenacity==8.4.2
+
+# YAML (synonyms.yaml)
+PyYAML==6.0.1
+
+# Logging
+structlog==24.2.0

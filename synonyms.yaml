@@ -1,0 +1,57 @@
+# Manual synonym overrides.
+# Format:
+#   "<canonical_name_lowercase>":
+#     - "alias1"
+#     - "alias2"
+#
+# These are merged with auto-generated variants at resolution time.
+
+synonyms:
+  "selumetinib":
+    - "AZD6244"
+    - "ARRY-142886"
+    - "selumetinib sulfate"
+
+  "rapamycin":
+    - "sirolimus"
+    - "AY-9944"
+    - "rapamune"
+
+  "imatinib":
+    - "gleevec"
+    - "glivec"
+    - "STI-571"
+    - "imatinib mesylate"
+
+  "vemurafenib":
+    - "PLX4032"
+    - "zelboraf"
+    - "RG7204"
+
+  "trametinib":
+    - "GSK1120212"
+    - "mekinist"
+    - "JTP-74057"
+
+  "erlotinib":
+    - "tarceva"
+    - "OSI-774"
+
+  "dabrafenib":
+    - "tafinlar"
+    - "GSK2118436"
+
+  "pembrolizumab":
+    - "keytruda"
+    - "MK-3475"
+    - "lambrolizumab"
+
+  "nivolumab":
+    - "opdivo"
+    - "BMS-936558"
+    - "MDX-1106"
+
+  "sunitinib":
+    - "sutent"
+    - "SU11248"
+    - "sunitinib malate"

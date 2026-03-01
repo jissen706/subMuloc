@@ -1,0 +1,38 @@
+# Venv
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Env and secrets
+.env
+.env.local
+*.pem
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker volumes (local data)
+pgdata/
+redisdata/

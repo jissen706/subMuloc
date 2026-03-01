@@ -1,0 +1,115 @@
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: druguser
+      POSTGRES_PASSWORD: drugpass
+      POSTGRES_DB: drugdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U druguser -d drugdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Database migrations (runs once and exits)
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+psycopg2://druguser:drugpass@postgres:5432/drugdb
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # FastAPI application
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://druguser:drugpass@postgres:5432/drugdb
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      INGEST_MODE: async
+      PUBMED_MAX_RESULTS: "50"
+      CTGOV_MAX_RESULTS: "100"
+      # Uncomment and set your NCBI API key for higher rate limits:
+      # NCBI_API_KEY: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Celery worker
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.ingest.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: postgresql+psycopg2://druguser:drugpass@postgres:5432/drugdb
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      INGEST_MODE: async
+      PUBMED_MAX_RESULTS: "50"
+      CTGOV_MAX_RESULTS: "100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
