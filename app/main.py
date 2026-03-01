@@ -46,6 +46,7 @@ from app.schemas.summary import (
     TrialSummaryOut,
 )
 from app.services import resolver
+from app.services.summary_compactor import compact_drug_summary
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +122,10 @@ def ingest_drug(
 
 
 # ---------------------------------------------------------------------------
-# GET /drug/{id}/summary
+# Summary builder (shared by /summary and /summary_short)
 # ---------------------------------------------------------------------------
-@app.get("/drug/{drug_id}/summary", response_model=DrugSummaryOut, tags=["query"])
-def get_drug_summary(drug_id: str, db: Session = Depends(get_db)) -> DrugSummaryOut:
-    """Return structured JSON summary of everything ingested for a drug."""
-
+def _build_drug_summary(drug_id: str, db: Session) -> DrugSummaryOut:
+    """Build full drug summary from DB. Raises HTTPException 404 if drug not found."""
     drug = db.get(Drug, drug_id)
     if drug is None:
         raise HTTPException(status_code=404, detail="Drug not found")
@@ -319,6 +318,26 @@ def get_drug_summary(drug_id: str, db: Session = Depends(get_db)) -> DrugSummary
             for c in clinvar_rows
         ],
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /drug/{id}/summary
+# ---------------------------------------------------------------------------
+@app.get("/drug/{drug_id}/summary", response_model=DrugSummaryOut, tags=["query"])
+def get_drug_summary(drug_id: str, db: Session = Depends(get_db)) -> DrugSummaryOut:
+    """Return structured JSON summary of everything ingested for a drug."""
+    return _build_drug_summary(drug_id, db)
+
+
+# ---------------------------------------------------------------------------
+# GET /drug/{id}/summary_short
+# ---------------------------------------------------------------------------
+@app.get("/drug/{drug_id}/summary_short", tags=["query"])
+def get_drug_summary_short(drug_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return compact JSON summary for UI + scoring (same data as /summary, compacted)."""
+    summary_out = _build_drug_summary(drug_id, db)
+    raw = summary_out.model_dump()
+    return compact_drug_summary(raw)
 
 
 # ---------------------------------------------------------------------------
