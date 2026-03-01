@@ -1,17 +1,23 @@
-# Drug Intelligence Ingestion Platform
+# SubMuloc
 
-Backend-only evidence ingestion and normalization system for drug intelligence.
+**Reverse discovery** — Columbus spelled backwards. Find diseases for drugs, not the other way around.
 
-## What it does
+SubMuloc is a drug intelligence backend that ingests drugs and diseases from public sources, maps them into a shared mechanism space, scores drug–disease relevance with explainable breakdowns, and surfaces evidence and comparators for frontend integration.
 
-Given a drug name or code, this platform:
-1. Resolves canonical identifiers and synonyms (PubChem + ChEMBL + manual overrides)
-2. Pulls structured data from 6 public sources: ClinicalTrials.gov, PubMed, ChEMBL, PubChem, openFDA, ClinVar
-3. Normalizes and stores everything into PostgreSQL
-4. Runs lightweight post-processing for toxicity flags and pathway keyword extraction
-5. Returns a structured JSON summary via REST API
+---
 
-**No frontend. No disease matching. No ranking or recommendation logic.**
+## What SubMuloc Does
+
+| Capability | Description |
+|------------|-------------|
+| **Drug ingestion** | Resolve drug names → PubChem, ChEMBL, ClinicalTrials.gov, PubMed, openFDA, ClinVar. Normalize and store structured evidence. |
+| **Disease ingestion** | Resolve disease queries → genes, pathways, ClinVar, PubMed. Store compact summaries for scoring. |
+| **Mechanism vectors** | Map drugs and diseases into a shared mechanism vocabulary (pathways, targets, phenotypes). Compute sparse + dense vectors. |
+| **Scoring** | Rank diseases for a drug using mechanism similarity, direction consistency, safety penalties, and uncertainty penalties. Full breakdown per pair. |
+| **Evidence ledger** | Build structured evidence for any drug–disease pair: mechanism overlap, pathway triggers, safety flags. Deterministic, no LLM. |
+| **Comparators** | Find mechanistically similar drugs and adjacent clinical conditions for a given drug. |
+| **Validation** | Score health metrics, data sufficiency, and recommendations for demo readiness. |
+| **Demo golden run** | Configurable script to ingest, vectorize, score, and fetch evidence for a demo set. |
 
 ---
 
@@ -21,191 +27,107 @@ Given a drug name or code, this platform:
 
 - Docker and Docker Compose
 
-### 1. Start all services
+### 1. Start services
 
 ```bash
 docker compose up --build
 ```
 
-This starts:
-- `postgres` — PostgreSQL 16
-- `redis` — Redis 7
-- `migrate` — runs Alembic migrations and exits
-- `api` — FastAPI on port 8000
-- `worker` — Celery worker (2 concurrent tasks)
+Starts: PostgreSQL, Redis, API (port 8000), Celery worker.
 
-### 2. Wait for services to be healthy (~15-30 seconds)
+### 2. Ingest a drug and disease
 
 ```bash
-docker compose ps
+# Drug (async by default; use INGEST_MODE=sync for in-process)
+curl -X POST http://localhost:8000/drug/ingest -H "Content-Type: application/json" -d '{"name": "Metformin"}'
+
+# Disease (synchronous)
+curl -X POST http://localhost:8000/disease/ingest -H "Content-Type: application/json" -d '{"query": "Type 2 diabetes"}'
 ```
 
-All services should show `healthy` or `running`.
-
-### 3. Ingest a drug
+### 3. Vectorize and score
 
 ```bash
-# Async mode (default) — returns immediately, worker processes in background
-curl -X POST http://localhost:8000/drug/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"name": "rapamycin"}'
-```
-
-Response:
-```json
-{
-  "drug_id": "uuid-here",
-  "canonical_name": "rapamycin",
-  "status": "queued",
-  "task_id": "celery-task-id",
-  "message": "Ingestion queued. Poll GET /drug/{id}/summary for results."
-}
-```
-
-### 4. Query the summary (after worker completes ~1-5 min)
-
-```bash
-curl http://localhost:8000/drug/{drug_id}/summary
-```
-
----
-
-## Synchronous mode (for development/testing)
-
-Set `INGEST_MODE=sync` to run the full pipeline in-process without Celery:
-
-```bash
-INGEST_MODE=sync docker compose up api
-```
-
-Or set it in your local `.env` file.
-
----
-
-## API Reference
-
-### `POST /drug/ingest`
-
-**Body:** `{ "name": "selumetinib" }`
-
-**Returns:**
-```json
-{
-  "drug_id": "...",
-  "canonical_name": "...",
-  "status": "queued | completed",
-  "task_id": "...",
-  "counts": {
-    "trials": 42,
-    "publications": 50,
-    "targets": 3,
-    "label_warnings": 5,
-    "adverse_events": 20,
-    "clinvar_associations": 8,
-    "toxicity_metrics": 4,
-    "pathway_mentions": 150
-  }
-}
-```
-
-### `GET /drug/{id}/summary`
-
-Returns full structured JSON with:
-- Canonical name, identifiers, synonyms
-- Molecular structure (SMILES, InChI, formula, weight)
-- Targets (from ChEMBL)
-- Trials grouped by phase/status
-- Publications by year
-- FDA label warnings
-- Toxicity metrics with interpreted flags
-- Pathway keyword mentions (aggregated by term)
-- ClinVar variant associations
-
-### `GET /drug/{id}/task/{task_id}/status`
-
-Poll Celery task status for async ingestion.
-
-### `GET /health`
-
-Liveness probe.
-
----
-
-## Disease (Block 1)
-
-Disease ingestion and short summary (first-class entities alongside drugs).
-
-### CURL demo
-
-```bash
-# 1) Ingest a disease (synchronous)
-curl -X POST http://localhost:8000/disease/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Brugada syndrome"}'
-
-# 2) Get short summary (use disease_id from step 1)
-curl http://localhost:8000/disease/{disease_id}/summary_short
-```
-
-### Endpoints
-
-- **POST /disease/resolve** — Resolve query to canonical_name, ids (orpha/omim), synonyms, resolver_notes.
-- **POST /disease/ingest** — Resolve, upsert disease, run ingestion, store raw artifact; returns disease_id.
-- **GET /disease/{disease_id}/summary** — Raw stored JSON.
-- **GET /disease/{disease_id}/summary_short** — Deterministic compact JSON (version `disease_short_v1`).
-
-### Smoke test list (manual ingestion)
-
-- Brugada syndrome
-- Catecholaminergic polymorphic ventricular tachycardia
-- Short QT syndrome
-- Hypertrophic cardiomyopathy
-- Arrhythmogenic right ventricular cardiomyopathy
-- Loeys-Dietz syndrome
-- Milroy disease
-- Lymphedema-distichiasis syndrome
-- Bardet-Biedl syndrome
-- Joubert syndrome
-
----
-
-## Block 2 — Mechanism vectors & search
-
-Vectorize drugs/diseases into mechanism space and search diseases-for-drug by cosine similarity.
-
-### CURL examples
-
-```bash
-# Vectorize a drug (compute + store)
+# Vectorize (use drug_id and disease_id from ingest responses)
 curl -X POST http://localhost:8000/vectorize/drug/{drug_id}
-
-# Vectorize a disease
 curl -X POST http://localhost:8000/vectorize/disease/{disease_id}
 
-# Batch vectorize diseases (skip_existing: true)
-curl -X POST http://localhost:8000/vectorize/batch/diseases \
-  -H "Content-Type: application/json" \
-  -d '{"disease_ids": ["uuid1", "uuid2"], "skip_existing": true}'
-
-# Get stored vector for an entity
-curl http://localhost:8000/vector/drug/{drug_id}
-curl http://localhost:8000/vector/disease/{disease_id}
-
-# Search diseases matching a drug (cosine similarity)
-curl -X POST http://localhost:8000/search/diseases_for_drug \
+# Rank diseases for a drug
+curl -X POST http://localhost:8000/score/drug_to_diseases \
   -H "Content-Type: application/json" \
   -d '{"drug_id": "{drug_id}", "top_k": 20}'
+
+# Get evidence for a pair
+curl http://localhost:8000/pair/{drug_id}/{disease_id}/evidence
 ```
 
-### Validation script
+### 4. Demo golden run (optional)
 
-Run against real DB to ensure vectors are non-empty and search returns sensible results:
+With the API running (`INGEST_MODE=sync` recommended):
 
 ```bash
-python scripts/validate_block2.py
+python scripts/demo_pack.py
 ```
 
-If the DB has no ingested drugs/diseases, the script prints instructions to ingest first.
+Configurable via `artifacts/demo_config.json` or `DEMO_DRUGS` / `DEMO_DISEASES` env vars. Writes `artifacts/demo_report.json`.
+
+---
+
+## API Overview
+
+### Meta
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Liveness probe |
+
+### Drug ingestion & summaries
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/drug/ingest` | Ingest drug by name. Body: `{"name": "..."}` |
+| GET | `/drug/{id}/task/{task_id}/status` | Poll async ingestion status |
+| GET | `/drug/{id}/summary` | Full structured summary |
+| GET | `/drug/{id}/summary_short` | Compact summary for scoring |
+
+### Disease ingestion & summaries
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/disease/resolve` | Resolve query → canonical name, IDs, synonyms |
+| POST | `/disease/ingest` | Ingest disease. Body: `{"query": "..."}` |
+| GET | `/disease/{id}/summary` | Raw stored summary |
+| GET | `/disease/{id}/summary_short` | Compact summary for scoring |
+
+### Mechanism vectors & search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/vectorize/drug/{id}` | Compute + store drug vector |
+| POST | `/vectorize/disease/{id}` | Compute + store disease vector |
+| POST | `/vectorize/batch/diseases` | Batch vectorize diseases |
+| GET | `/vector/{entity_type}/{entity_id}` | Get stored vector |
+| POST | `/search/diseases_for_drug` | Cosine similarity search. Body: `drug_id`, optional `disease_ids`, `top_k` |
+
+### Scoring & evidence
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/score/drug_to_diseases` | Rank diseases for a drug. Body: `drug_id`, optional `disease_ids`, `top_k`, `weights`, `include_evidence` |
+| GET | `/pair/{drug_id}/{disease_id}/evidence` | Structured evidence for a pair (recomputes if not stored) |
+
+### Comparators & node tiers
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/drug/{id}/comparators?top_k=10` | Similar drugs + adjacent conditions |
+| GET | `/drug/{id}/node_tiers` | Mechanism node evidence tiers |
+
+### Validation
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/validation/score_health` | Global metrics, per-drug metrics, data sufficiency, recommendations |
 
 ---
 
@@ -213,62 +135,77 @@ If the DB has no ingested drugs/diseases, the script prints instructions to inge
 
 ```
 app/
-  main.py              FastAPI application + endpoints
-  config.py            Settings (env vars)
-  db.py                SQLAlchemy engine + session
-  models.py            All DB models (12 tables)
-  cache.py             Redis-backed HTTP cache (7-day TTL)
-  schemas/
-    drug.py            Ingest request/response schemas
-    summary.py         Summary response schema
+  main.py              FastAPI app, drug ingest, summaries
+  config.py             Settings (env vars)
+  db.py                 SQLAlchemy engine + session
+  models.py             DB models (drug, disease, mechanism_vector, pair_evidence, etc.)
+  cache.py              Redis-backed HTTP cache
+  routes/
+    disease.py          Disease resolve, ingest, summaries
+    vectorize.py        Vectorization + search
+    score.py            Drug-to-diseases scoring
+    evidence.py         Pair evidence
+    comparator.py      Similar drugs + node tiers
+    validation.py       Score health
   services/
-    base.py            DrugContext, NormalizedRecord, SourceIngestor protocol
-    resolver.py        Name → identifiers (PubChem + ChEMBL)
-    pubchem.py         Molecular structure + identifiers
-    chembl.py          Drug targets + mechanisms
-    ctgov.py           Clinical trials
-    pubmed.py          Publications (E-utilities)
-    openfda.py         FDA label warnings + FAERS AE signals
-    clinvar.py         Gene/variant associations
-  postprocess/
-    tox_interpreter.py Toxicity heuristics (DB read-only)
-    pathway_extractor.py Pathway keyword extraction (DB read-only)
+    resolver.py         Drug name → identifiers
+    disease_resolver.py Disease query → canonical
+    disease_ingest.py   Disease genes, pathways, ClinVar, PubMed
+    mechanism_mapper.py Drug/disease → mechanism vectors
+    mechanism_vocab.py  Shared vocabulary
+    scoring.py          score_pair (mechanism, direction, safety, uncertainty)
+    evidence_ledger.py  build_pair_evidence, store/get
+    disease_direction.py Direction consistency
+    validation_engine.py Score health, data sufficiency, recommendations
+    comparator_engine.py Similar drugs, adjacent conditions
   tasks/
-    ingest.py          Celery task + INGESTORS registry
-  utils/
-    normalize.py       Drug name normalization + variant generation
-    text.py            Snippet extraction + keyword scanning
-  migrations/          Alembic migrations
+    ingest.py           Celery drug ingestion pipeline
+  postprocess/
+    tox_interpreter.py  Toxicity heuristics
+    pathway_extractor.py Pathway keyword extraction
 ```
-
-### Adding a new data source
-
-1. Create `app/services/mysource.py` implementing `BaseIngestor`
-2. Add one line to `INGESTORS` list in `app/tasks/ingest.py`
-
-That's it — the pipeline runner handles the rest.
 
 ---
 
 ## Configuration
 
-All settings via environment variables (or `.env` file):
-
 | Variable | Default | Description |
-|---|---|---|
-| `DATABASE_URL` | `postgresql+psycopg2://druguser:drugpass@localhost:5432/drugdb` | PostgreSQL connection |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql+psycopg2://druguser:drugpass@localhost:5432/drugdb` | PostgreSQL |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis |
 | `INGEST_MODE` | `async` | `async` (Celery) or `sync` (in-process) |
-| `NCBI_API_KEY` | `` | NCBI API key for higher PubMed/ClinVar rate limits |
-| `PUBMED_MAX_RESULTS` | `50` | Max papers to fetch per drug |
-| `CTGOV_MAX_RESULTS` | `100` | Max trials to fetch per drug |
+| `SCORING_DEMO_MODE` | `false` | Demo scoring tweaks when `true` |
+| `NCBI_API_KEY` | `` | NCBI API key for higher rate limits |
+| `PUBMED_MAX_RESULTS` | `50` | Max papers per drug |
+| `CTGOV_MAX_RESULTS` | `100` | Max trials per drug |
 | `CACHE_TTL_SECONDS` | `604800` | HTTP cache TTL (7 days) |
+
+---
+
+## Sync mode (development)
+
+```bash
+INGEST_MODE=sync docker compose up api
+```
+
+Runs drug ingestion in-process without Celery. Use for local dev and `scripts/demo_pack.py`.
+
+---
+
+## Local development (no Docker for app)
+
+```bash
+docker compose up postgres redis -d
+pip install -r requirements.txt
+DATABASE_URL=postgresql+psycopg2://druguser:drugpass@localhost:5432/drugdb alembic upgrade head
+INGEST_MODE=sync DATABASE_URL=... uvicorn app.main:app --reload
+```
 
 ---
 
 ## Manual synonym overrides
 
-Edit `synonyms.yaml` to add known aliases:
+Edit `synonyms.yaml`:
 
 ```yaml
 synonyms:
@@ -279,33 +216,9 @@ synonyms:
 
 ---
 
-## Database
+## Scripts
 
-PostgreSQL with 12 tables:
-
-`drug` → `drug_identifier` → `drug_synonym` → `molecular_structure` → `target` → `trial` → `publication` → `label_warning` → `adverse_event` → `clinvar_association` → `toxicity_metric` → `disease_pathway_mention` + `evidence` (generic)
-
-All ingestors write to both structured tables and the generic `evidence` table for traceability.
-
----
-
-## Local development (without Docker)
-
-```bash
-# Start only the infrastructure
-docker compose up postgres redis -d
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run migrations
-DATABASE_URL=postgresql+psycopg2://druguser:drugpass@localhost:5432/drugdb alembic upgrade head
-
-# Start API in sync mode
-INGEST_MODE=sync DATABASE_URL=postgresql+psycopg2://druguser:drugpass@localhost:5432/drugdb \
-  uvicorn app.main:app --reload
-
-# Start Celery worker (separate terminal)
-DATABASE_URL=postgresql+psycopg2://druguser:drugpass@localhost:5432/drugdb \
-  celery -A app.tasks.ingest.celery_app worker --loglevel=info
-```
+| Script | Purpose |
+|--------|---------|
+| `scripts/demo_pack.py` | Demo golden run: ingest, vectorize, score, evidence, comparators. Config via `artifacts/demo_config.json` or `DEMO_DRUGS`/`DEMO_DISEASES`. |
+| `scripts/validate_block2.py` | Validate mechanism vectors against real DB. |
