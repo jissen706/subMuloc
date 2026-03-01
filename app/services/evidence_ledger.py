@@ -77,10 +77,12 @@ def build_pair_evidence(
     disease_sparse = disease_sparse or {}
     scoring_breakdown = scoring_breakdown or {}
 
-    # 1) Mechanism overlap from breakdown (with tier info from node_tiering)
+    # 1) Mechanism overlap from breakdown (with tier + direction info)
     mech = scoring_breakdown.get("mechanism") or {}
     top_nodes_raw = mech.get("top_nodes") or []
     node_tiers = compute_node_tiers(drug_short, drug_sparse)
+    direction_breakdown = scoring_breakdown.get("direction") or {}
+    node_effects_map = {e["node"]: e for e in direction_breakdown.get("node_effects", []) if isinstance(e, dict)}
     mechanism_overlap: list[dict] = []
     for n in top_nodes_raw[: _MAX_MECHANISM_OVERLAP]:
         if not isinstance(n, dict):
@@ -102,6 +104,11 @@ def build_pair_evidence(
                 item["tier"] = tier_info.get("tier", 0)
                 item["support"] = tier_info.get("support", [])
                 item["weight"] = tier_info.get("weight", round(drug_w, 4))
+            eff = node_effects_map.get(node)
+            if eff is not None:
+                item["disease_direction"] = eff.get("disease_dir", 0)
+                item["drug_direction"] = eff.get("drug_dir", 0)
+                item["direction_effect"] = round(float(eff.get("effect", 0)), 4)
             mechanism_overlap.append(item)
     mechanism_overlap.sort(key=lambda x: (-x["overlap_weight"], x["node"]))
     mechanism_overlap = mechanism_overlap[:_MAX_MECHANISM_OVERLAP]
@@ -172,6 +179,24 @@ def build_pair_evidence(
         "drug_pubs_total": int(drug_stats.get("pubs_total") or 0) if isinstance(drug_stats, dict) else 0,
     }
 
+    # 6) Direction summary
+    supporting_nodes: list[str] = []
+    conflicting_nodes: list[str] = []
+    for eff in direction_breakdown.get("node_effects") or []:
+        if not isinstance(eff, dict):
+            continue
+        n = eff.get("node") or ""
+        e = float(eff.get("effect", 0))
+        if n and e > 0:
+            supporting_nodes.append(n)
+        elif n and e < 0:
+            conflicting_nodes.append(n)
+    direction_summary: dict[str, Any] = {
+        "direction_score": round(float(direction_breakdown.get("direction_score", 0)), 4),
+        "supporting_nodes": supporting_nodes[:10],
+        "conflicting_nodes": conflicting_nodes[:10],
+    }
+
     return {
         "drug_id": drug_id or "",
         "disease_id": disease_id or "",
@@ -181,6 +206,7 @@ def build_pair_evidence(
         "safety_flags": safety_flags,
         "trial_summary": trial_summary,
         "literature_summary": literature_summary,
+        "direction_summary": direction_summary,
         "version": EVIDENCE_VERSION,
     }
 

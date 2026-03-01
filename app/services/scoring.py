@@ -1,11 +1,12 @@
 """
 Block 3 — Scoring engine: rank diseases for a given drug.
 
-Deterministic. Uses mechanism similarity, safety penalty, evidence score, uncertainty penalty.
-All components normalized 0..1.
+Deterministic. Uses mechanism similarity, direction compatibility, safety penalty,
+evidence score, uncertainty penalty. All components normalized 0..1.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from app.services.mechanism_mapper import cosine_similarity
@@ -17,7 +18,10 @@ DEFAULT_WEIGHTS = {
     "evidence": 0.4,
     "safety": 0.8,
     "uncertainty": 0.3,
+    "direction": 0.6,
 }
+
+DEMO_MODE: bool = os.getenv("SCORING_DEMO_MODE", "").lower() in {"1", "true", "yes", "on"}
 
 
 def mechanism_score(
@@ -161,6 +165,63 @@ def evidence_score(drug_short: dict, disease_short: dict) -> dict[str, Any]:
     return {"score": round(score, 4), "reasons": reasons}
 
 
+def direction_compatibility(
+    drug_sparse: dict,
+    disease_sparse: dict,
+) -> dict[str, Any]:
+    """
+    Direction-aware causal compatibility.
+    Compatible: disease +1 + drug -1, or disease -1 + drug +1.
+    Incompatible: same direction.
+    """
+    drug_sparse = drug_sparse or {}
+    disease_sparse = disease_sparse or {}
+    node_effects: list[dict] = []
+    total_overlap = 0.0
+    contribution_sum = 0.0
+
+    for node in drug_sparse:
+        if node not in disease_sparse:
+            continue
+        dw = float((drug_sparse[node] or {}).get("weight", 0.0))
+        diw = float((disease_sparse[node] or {}).get("weight", 0.0))
+        if dw <= 0 or diw <= 0:
+            continue
+        weight_overlap = min(dw, diw)
+        drug_dir = int((drug_sparse[node] or {}).get("direction", 0))
+        disease_dir = int((disease_sparse[node] or {}).get("direction", 0))
+        drug_dir = max(-1, min(1, drug_dir))
+        disease_dir = max(-1, min(1, disease_dir))
+
+        contribution = 0.0
+        if disease_dir == 0 or drug_dir == 0:
+            contribution = 0.0
+        elif (disease_dir == 1 and drug_dir == -1) or (disease_dir == -1 and drug_dir == 1):
+            contribution = weight_overlap
+        else:
+            contribution = -weight_overlap * 0.5
+
+        total_overlap += weight_overlap
+        contribution_sum += contribution
+        node_effects.append({
+            "node": node,
+            "disease_dir": disease_dir,
+            "drug_dir": drug_dir,
+            "effect": round(contribution, 4),
+        })
+
+    if total_overlap <= 0:
+        direction_score = 0.0
+    else:
+        direction_score = contribution_sum / total_overlap
+    direction_score = max(-1.0, min(1.0, direction_score))
+
+    return {
+        "direction_score": round(direction_score, 6),
+        "node_effects": node_effects,
+    }
+
+
 def uncertainty_penalty(
     drug_short: dict,
     disease_short: dict,
@@ -215,10 +276,15 @@ def score_pair(
     weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """
-    Combine mechanism, evidence, safety, uncertainty with weights.
+    Combine mechanism, direction, evidence, safety, uncertainty with weights.
     Returns final_score and full breakdown. Deterministic.
     """
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
+
+    # Demo mode softens direction + uncertainty and clamps minimum score
+    if DEMO_MODE:
+        w["direction"] = w.get("direction", DEFAULT_WEIGHTS["direction"]) * 0.6
+        w["uncertainty"] = w.get("uncertainty", DEFAULT_WEIGHTS["uncertainty"]) * 0.7
 
     mech = mechanism_score(drug_dense or [], disease_dense or [])
     ev = evidence_score(drug_short or {}, disease_short or {})
@@ -229,19 +295,24 @@ def score_pair(
         drug_sparse or {},
         disease_sparse or {},
     )
+    direction = direction_compatibility(drug_sparse or {}, disease_sparse or {})
 
     final = (
         w.get("mechanism", 1.0) * mech["score"]
+        + w.get("direction", 0.6) * direction["direction_score"]
         + w.get("evidence", 0.4) * ev["score"]
         - w.get("safety", 0.8) * safe["penalty"]
         - w.get("uncertainty", 0.3) * unc["penalty"]
     )
+    if DEMO_MODE and final < 0.01:
+        final = 0.01
     final = round(final, 6)
 
     return {
         "final_score": final,
         "breakdown": {
             "mechanism": mech,
+            "direction": direction,
             "evidence": ev,
             "safety": safe,
             "uncertainty": unc,

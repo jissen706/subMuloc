@@ -14,6 +14,7 @@ import math
 import re
 from typing import Any
 
+from app.services.disease_direction import infer_disease_node_directions
 from app.services.mechanism_vocab import (
     GENE_TO_NODES,
     MECH_ALIASES,
@@ -198,40 +199,42 @@ def _match_nodes_from_terms(
 
 
 def _infer_drug_directions(
+    drug_short: dict,
     targets: list[tuple[str, str, str]],
     active_nodes: set[str],
 ) -> dict[str, int]:
     """
-    v0 best-effort direction per node from target actions.
+    Best-effort direction per node from target actions, pathways, canonical_name.
     Inhibitory keywords → -1; activating → +1; ambiguous → 0.
     First deterministic match wins per node.
     """
     dirs: dict[str, int] = {}
+    drug_short = drug_short or {}
 
-    for name, gene, action in targets:
-        action_norm = _norm(action)
-        name_norm = _norm(name)
-
-        d = 0
+    def _text_direction(text: str) -> int:
+        t = _norm(text)
+        if not t:
+            return 0
         for tok in _INHIBITORY_TOKENS:
-            if tok in action_norm:
-                d = -1
-                break
-        if d == 0:
-            for tok in _ACTIVATING_TOKENS:
-                if tok in action_norm:
-                    d = +1
-                    break
-        if d == 0:
-            continue  # action ambiguous — skip direction assignment
+            if tok in t:
+                return -1
+        for tok in _ACTIVATING_TOKENS:
+            if tok in t:
+                return 1
+        return 0
 
-        # Apply to gene-mapped nodes
+    # 1. Target actions (highest confidence)
+    for name, gene, action in targets:
+        d = _text_direction(action)
+        if d == 0:
+            d = _text_direction(name)
+        if d == 0:
+            continue
         if gene and gene in GENE_TO_NODES:
             for node in GENE_TO_NODES[gene]:
                 if node in active_nodes and node not in dirs:
                     dirs[node] = d
-
-        # Apply to alias-matched nodes from target name
+        name_norm = _norm(name)
         for node in active_nodes:
             if node in dirs:
                 continue
@@ -239,6 +242,29 @@ def _infer_drug_directions(
                 if alias and (alias in name_norm or (len(name_norm) >= 3 and name_norm in alias)):
                     dirs[node] = d
                     break
+
+    # 2. Pathways text (if no direction from targets)
+    pathways = extract_pathway_terms(drug_short)
+    for term, _ in pathways:
+        d = _text_direction(term)
+        if d == 0:
+            continue
+        term_norm = _norm(term)
+        for node in active_nodes:
+            if node in dirs:
+                continue
+            for alias in _ALIASES_NORM.get(node, []):
+                if alias and (alias in term_norm or (len(term_norm) >= 3 and term_norm in alias)):
+                    dirs[node] = d
+                    break
+
+    # 3. Canonical name
+    canon = _text_direction(drug_short.get("canonical_name") or "")
+    if canon != 0:
+        for node in active_nodes:
+            if node not in dirs:
+                dirs[node] = canon
+                break  # apply to first unmatched only
 
     return dirs
 
@@ -322,7 +348,7 @@ def drug_to_mech_vector(drug_short: dict) -> dict:
                     break  # first alias per node per target name
 
     # 3. Direction inference
-    directions = _infer_drug_directions(targets, set(raw.keys()))
+    directions = _infer_drug_directions(drug_short, targets, set(raw.keys()))
 
     return _finalize_sparse(raw, evid, directions)
 
@@ -380,8 +406,9 @@ def disease_to_mech_vector(disease_short: dict) -> dict:
             if ev_str not in ev_list:
                 ev_list.append(ev_str)
 
-    # Direction always 0 for disease in v0
-    return _finalize_sparse(raw, evid, None)
+    # Direction from phenotype/ClinVar heuristics
+    disease_dirs = infer_disease_node_directions(disease_short, raw)
+    return _finalize_sparse(raw, evid, disease_dirs)
 
 
 # ---------------------------------------------------------------------------

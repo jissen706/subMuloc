@@ -36,3 +36,6 @@ htmlcov/
 # Docker volumes (local data)
 pgdata/
 redisdata/
+
+# Demo artifacts (generated)
+artifacts/
