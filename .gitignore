@@ -38,4 +38,8 @@ pgdata/
 redisdata/
 
 # Demo artifacts (generated)
-artifacts/
+artifacts/*
+!artifacts/bootstrap_seed.example.json
+
+# Bootstrap seed config (local override, do not commit)
+artifacts/bootstrap_seed.json

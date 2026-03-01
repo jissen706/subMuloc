@@ -9,6 +9,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -69,6 +70,10 @@ app.include_router(evidence_router)
 app.include_router(score_router)
 app.include_router(validation_router)
 app.include_router(vectorize_router)
+
+if os.environ.get("ENABLE_BOOTSTRAP_ROUTES", "").lower() in {"1", "true", "yes", "on"}:
+    from app.routes.bootstrap import router as bootstrap_router
+    app.include_router(bootstrap_router)
 
 
 # ---------------------------------------------------------------------------

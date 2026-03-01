@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from app.config import get_settings
+from app.services.mechanism_vocab import GENE_TO_NODES, MECH_ALIASES
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,98 @@ def _pathway_counts(text: str) -> list[dict[str, Any]]:
         if c > 0:
             out.append({"term": kw, "count": c, "source": "keyword_dict"})
     return out
+
+
+def _norm_text(s: str) -> str:
+    """Lowercase, replace non-alphanumeric with space, collapse whitespace."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", s.lower())).strip()
+
+
+def backfill_disease_signals(summary_raw: dict) -> dict:
+    """
+    Enrich a raw disease summary with mechanism pathway_terms (and optionally
+    genes) when upstream sources are sparse.  Deterministic, no network calls.
+
+    Triggers only when:  len(pathway_terms) < 3  OR  genes is empty.
+
+    Strategy:
+      1. Build a text corpus from canonical_name + synonyms already in raw.
+      2. Match MECH_ALIASES keywords against corpus → add pathway_term entries
+         (term = matching alias, count = 2, source = "backfill").  Cap at 12.
+      3. Conservative gene backfill: look for GENE_TO_NODES keys appearing as
+         whole words in the uppercase corpus; add those genes (cap total at 15).
+
+    Tags source_status["backfill"] = "applied" | "skipped".
+    """
+    source_status = summary_raw.setdefault("source_status", {})
+    pathway_terms: list = list(summary_raw.get("pathway_terms") or [])
+    genes_raw: list = list(summary_raw.get("genes") or [])
+    gene_symbols: list[str] = [
+        (g.get("symbol") if isinstance(g, dict) else str(g)).strip()
+        for g in genes_raw
+    ]
+    gene_symbols = [s for s in gene_symbols if s]
+
+    if len(pathway_terms) >= 3 and gene_symbols:
+        source_status["backfill"] = "skipped"
+        return summary_raw
+
+    canonical_name = summary_raw.get("canonical_name") or ""
+    synonyms_raw = summary_raw.get("synonyms") or []
+    synonyms_list = synonyms_raw if isinstance(synonyms_raw, list) else []
+    corpus = " ".join([canonical_name] + synonyms_list)
+    corpus_norm = _norm_text(corpus)
+
+    if not corpus_norm:
+        source_status["backfill"] = "skipped"
+        return summary_raw
+
+    # --- Pathway term backfill via MECH_ALIASES ---
+    existing_term_norms: set[str] = {
+        _norm_text(p.get("term") or "")
+        for p in pathway_terms
+        if isinstance(p, dict) and p.get("term")
+    }
+    added_terms: list[dict] = []
+    added_norms: set[str] = set()
+
+    for _node, aliases in MECH_ALIASES.items():
+        if len(added_terms) >= 12:
+            break
+        for alias in aliases:
+            alias_norm = _norm_text(alias)
+            if not alias_norm:
+                continue
+            if alias_norm in corpus_norm or (
+                len(corpus_norm) >= 3 and corpus_norm in alias_norm
+            ):
+                if alias_norm not in existing_term_norms and alias_norm not in added_norms:
+                    added_terms.append({"term": alias, "count": 2, "source": "backfill"})
+                    added_norms.add(alias_norm)
+                break  # one alias per node
+
+    # --- Conservative gene backfill: known gene symbols in corpus ---
+    corpus_upper = corpus.upper()
+    existing_gene_set: set[str] = set(gene_symbols)
+    new_genes: list[dict] = []
+    for gene_sym in sorted(GENE_TO_NODES):  # sorted for determinism
+        if gene_sym in existing_gene_set or len(gene_sym) < 3:
+            continue
+        if re.search(
+            r"(?<![A-Z0-9])" + re.escape(gene_sym) + r"(?![A-Z0-9])",
+            corpus_upper,
+        ):
+            new_genes.append({"symbol": gene_sym, "source": "backfill"})
+            existing_gene_set.add(gene_sym)
+
+    applied = bool(added_terms or new_genes)
+    if added_terms:
+        summary_raw["pathway_terms"] = pathway_terms + added_terms
+    if new_genes:
+        summary_raw["genes"] = (genes_raw + new_genes)[:15]
+
+    source_status["backfill"] = "applied" if applied else "skipped"
+    return summary_raw
 
 
 def _bucket_significance(s: str) -> str:
@@ -352,4 +445,5 @@ def ingest_disease(disease: Any, query_hint: str | None = None) -> dict:
         "source_status": source_status,
         "errors": errors[:20],
     }
+    raw = backfill_disease_signals(raw)
     return raw

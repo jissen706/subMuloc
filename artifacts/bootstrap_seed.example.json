@@ -1,0 +1,24 @@
+{
+  "_comment": "High-signal rare-disease demo set. Diseases chosen to have mechanism keywords in their canonical names so backfill_disease_signals produces non-zero vectors even without Orphanet data.",
+  "drugs": ["Ruxolitinib", "Sirolimus", "Tofacitinib"],
+  "diseases": [
+    "STING-associated vasculopathy",
+    "Aicardi-Goutières syndrome",
+    "STAT1 gain-of-function disease",
+    "Interferonopathy",
+    "NLRP3-associated autoinflammatory disease",
+    "Tuberous sclerosis complex",
+    "NGLY1 deficiency",
+    "Long QT syndrome",
+    "Familial hypercholesterolemia",
+    "Marfan syndrome",
+    "Pulmonary arterial hypertension",
+    "Systemic lupus erythematosus"
+  ],
+  "top_k": 10,
+  "skip_existing": true,
+  "comparators_top_k": 10,
+  "require_min_drugs": 2,
+  "require_min_diseases": 6,
+  "force_vectorize": true
+}

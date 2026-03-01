@@ -197,6 +197,39 @@ def build_pair_evidence(
         "conflicting_nodes": conflicting_nodes[:10],
     }
 
+    # Provenance: infer from existing fields (no new network calls)
+    drug_sources: list[str] = []
+    if drug_short.get("targets_top") or drug_short.get("targets"):
+        drug_sources.append("ChEMBL")
+    if isinstance(drug_short.get("trials"), dict) and (drug_short["trials"].get("total") or 0) > 0:
+        drug_sources.append("ClinicalTrials.gov")
+    if (drug_short.get("stats") or {}).get("pubs_total"):
+        drug_sources.append("PubMed")
+    if drug_short.get("safety") or drug_short.get("label_warnings"):
+        drug_sources.append("openFDA")
+    if drug_short.get("pathways_top"):
+        drug_sources.append("pathway_extraction")
+
+    disease_sources: list[str] = []
+    if disease_short.get("genes"):
+        disease_sources.append("gene_detection")
+    if disease_short.get("clinvar_top") or (disease_short.get("clinvar") and disease_short["clinvar"].get("top_genes")):
+        disease_sources.append("ClinVar")
+    if (disease_short.get("stats") or {}).get("pubs_total"):
+        disease_sources.append("PubMed")
+
+    provenance_notes: list[str] = []
+    if not drug_sources:
+        provenance_notes.append("Drug: limited source coverage")
+    if not disease_sources:
+        provenance_notes.append("Disease: limited source coverage")
+
+    provenance: dict[str, Any] = {
+        "drug_sources": drug_sources[:10],
+        "disease_sources": disease_sources[:10],
+        "notes": provenance_notes[:5],
+    }
+
     return {
         "drug_id": drug_id or "",
         "disease_id": disease_id or "",
@@ -207,6 +240,7 @@ def build_pair_evidence(
         "trial_summary": trial_summary,
         "literature_summary": literature_summary,
         "direction_summary": direction_summary,
+        "provenance": provenance,
         "version": EVIDENCE_VERSION,
     }
 
