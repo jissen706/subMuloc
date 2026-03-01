@@ -1,12 +1,12 @@
-# SubMuloc
+# Magellan
 
-**Reverse discovery** — Columbus spelled backwards. Find diseases for drugs, not the other way around.
+**Reverse discovery** — Find diseases for drugs, not the other way around.
 
-SubMuloc is a drug intelligence backend that ingests drugs and diseases from public sources, maps them into a shared mechanism space, scores drug–disease relevance with explainable breakdowns, and surfaces evidence and comparators for frontend integration.
+Magellan is a drug intelligence backend that ingests drugs and diseases from public sources, maps them into a shared mechanism space, scores drug–disease relevance with explainable breakdowns, and surfaces evidence and comparators for frontend integration.
 
 ---
 
-## What SubMuloc Does
+## What Magellan Does
 
 | Capability | Description |
 |------------|-------------|
